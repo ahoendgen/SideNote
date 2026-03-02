@@ -1,4 +1,18 @@
-# SideNote
+# SideNote Supercharged
+
+> **SideNote Supercharged -- personal fork of [SideNote](https://github.com/mofukuru/SideNote) by [@ahoendgen](https://github.com/ahoendgen)**
+>
+> Following my naming tradition, all my personal forks get the "Super" prefix and live on `supercharged` branches. This is not a standalone project -- it's my customized variant of SideNote with features I need for my daily workflows. Changes that make sense for the broader community may be contributed back to the original project.
+>
+> Check out my other [supercharged forks](https://github.com/ahoendgen/supercharged).
+
+## Supercharged Features
+
+Features added in this fork on top of upstream SideNote:
+
+- _(no changes yet, fork freshly set up)_
+
+---
 
 SideNote is a plugin for [Obsidian](https://obsidian.md) that allows you to add comments to your notes. These comments are displayed in a dedicated side pane, making it easy to review and navigate annotations without cluttering the main text. Comments are highlighted directly in the editor for quick visual reference.
 
@@ -47,11 +61,13 @@ SideNote is a plugin for [Obsidian](https://obsidian.md) that allows you to add 
 ### Viewing Comments
 
 **Option 1: Sidebar Mode**
+
 - Click the message-square icon in the ribbon
 - Or run "Side Note: Open in Sidebar" from the command palette
 - The view stays in the sidebar and automatically updates as you switch files
 
 **Option 2: Split View Mode**
+
 - Run "Side Note: Open in Split View" from the command palette
 - Opens a new pane to the right, displaying comments for the current file
 
@@ -104,11 +120,13 @@ Access settings via Settings → Side Note:
 #### **Open Comments in Sidebar**
 
 **iOS (Obsidian iOS app):**
+
 1. Tap the hamburger menu (≡) at the top left
 2. Swipe right or run the "Open in Sidebar" command
 3. Comments list will appear in the sidebar
 
 **Android (Obsidian Android app):**
+
 1. Tap the menu icon (≡) at the top of the screen
 2. Run the "Side Note: Open in Sidebar" command (search for it)
 3. Comments list will appear in the right panel
@@ -158,6 +176,7 @@ Access settings via Settings → Side Note:
 ## Version History
 
 ### 1.0.4
+
 - **Fixed coordinate drift issue on mobile devices**
   - Implemented dynamic text search for highlights to always display at accurate positions during editing
   - Resolved highlight position drift on Android/iOS when editing lines
@@ -170,6 +189,7 @@ Access settings via Settings → Side Note:
   - Provides "Cancel" and "Delete" options for safe deletion operations
 
 ### 1.0.3
+
 - **Added full mobile support** for iOS and Android devices
 - **Added comment button to mobile editor toolbar** (message icon) for easy access
 - Improved comment modal with better focus management
@@ -181,6 +201,7 @@ Access settings via Settings → Side Note:
 - Added font-size optimization (16px) to prevent iOS auto-zoom
 
 ### 1.0.2
+
 - Added click handler on highlighted text to open sidebar and navigate to comment
 - Added keyboard shortcuts to comment modal:
   - `Cmd/Ctrl + Enter` to save and close
@@ -194,6 +215,7 @@ Access settings via Settings → Side Note:
 - Fixed highlight positioning when multiple editors are open for different files
 
 ### 1.0.1
+
 - Added hash-based text tracking for robust comment anchoring
 - Implemented 3-stage matching strategy (hash+proximity → full-file hash → orphaned)
 - Added in-editor highlighting with CodeMirror 6 decorations
@@ -203,6 +225,7 @@ Access settings via Settings → Side Note:
 - Comprehensive README documentation with limitation warnings
 
 ### 1.0.0
+
 - Initial release
 - Basic comment functionality
 - Add, edit, and delete comments

@@ -11,8 +11,8 @@
 Features added in this fork on top of upstream SideNote:
 
 - Rebranded to SideNote Supercharged (custom plugin ID for side-by-side install)
-- File-level comments — add comments to an entire file, not just text selections
-- Inline comment section — view and manage comments directly in the note
+- File-level comments: add comments to an entire file, not just text selections
+- Inline comment section: view and manage comments directly in the note
 - Threaded replies on comments
 - JSONL-based comment storage alongside the standard data.json
 - CLI for AI agent and automation comment management (add, list, edit, resolve, reply) with nanoid-based IDs and auto vault detection

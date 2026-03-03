@@ -15,7 +15,9 @@ Features added in this fork on top of upstream SideNote:
 - Inline comment section: view and manage comments directly in the note
 - Threaded replies on comments
 - JSONL-based comment storage alongside the standard data.json
-- CLI for AI agent and automation comment management (add, list, edit, resolve, reply) with nanoid-based IDs and auto vault detection
+- CLI for AI agent and automation comment management (add, list, show, edit, resolve, reply) with nanoid-based IDs and auto vault detection
+- Live sync: file watcher on comments.jsonl for instant CLI updates, merging external changes instead of overwriting
+- Timestamps shown as dd.mm.yyyy with locale-aware relative time
 
 ---
 

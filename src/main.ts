@@ -1119,6 +1119,7 @@ export default class SideNote extends Plugin {
     private editorUpdateTimers: Record<string, number> = {};
     inlineRenderer: InlineCommentsRenderer;
     private _selfWritingComments = false;
+    private _commentsFileWatcher: ReturnType<typeof import('fs').watch> | null = null;
 
     /** Ensure markdown comment folder exists and return normalized path */
     private async ensureCommentFolder(): Promise<string> {
@@ -1467,6 +1468,10 @@ export default class SideNote extends Plugin {
             })
         );
 
+        // Watch comments.jsonl for external changes (e.g., from CLI)
+        // Uses Node.js fs.watch for instant OS-level file change detection
+        this.setupCommentsFileWatcher();
+
         // Live editor change - refresh decorations without marking orphaned (safe for mobile)
         this.registerEvent(
             this.app.workspace.on('editor-change', (editor, info) => {
@@ -1494,6 +1499,66 @@ export default class SideNote extends Plugin {
 
     onunload() {
         this.inlineRenderer.destroy();
+        this._commentsFileWatcher?.close();
+        this._commentsFileWatcher = null;
+    }
+
+    /**
+     * Set up a native fs.watch on comments.jsonl for instant external change detection.
+     * Debounces to 300ms to coalesce rapid writes.
+     */
+    private setupCommentsFileWatcher() {
+        try {
+            const fs = require('fs');
+            const nodePath = require('path');
+            const basePath = (this.app.vault.adapter as any).basePath;
+            if (!basePath) return;
+            const fullPath = nodePath.join(basePath, this.getCommentsFilePath());
+
+            // Ensure file exists before watching
+            if (!fs.existsSync(fullPath)) return;
+
+            let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+            this._commentsFileWatcher = fs.watch(fullPath, () => {
+                if (this._selfWritingComments) return;
+                if (debounceTimer) clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(async () => {
+                    try {
+                        const content = fs.readFileSync(fullPath, 'utf-8').trim();
+                        if (!content) return;
+
+                        const diskComments: Comment[] = content.split('\n').map((line: string) => JSON.parse(line));
+                        const memoryIds = new Set(
+                            this.comments.map(c => c.id).filter((id): id is string => !!id)
+                        );
+
+                        let changed = false;
+                        for (const dc of diskComments) {
+                            if (dc.id && !memoryIds.has(dc.id)) {
+                                this.comments.push(dc);
+                                changed = true;
+                            }
+                        }
+
+                        if (changed) {
+                            this.commentManager.updateComments(this.comments);
+                            this.app.workspace.getLeavesOfType("sidenote-view").forEach(leaf => {
+                                if (leaf.view instanceof SideNoteView) {
+                                    leaf.view.renderComments();
+                                }
+                            });
+                            this.refreshEditorDecorations();
+                            this.inlineRenderer.updateAll();
+                        }
+                    } catch (e) {
+                        console.warn('SideNote: Error processing file change', e);
+                    }
+                }, 300);
+            });
+        } catch {
+            // fs.watch unavailable (mobile) -- external sync not supported
+        }
     }
 
     /**
@@ -1600,10 +1665,10 @@ export default class SideNote extends Plugin {
      * Merge comments from disk that are not in memory (e.g., added by CLI).
      * Preserves plugin's in-memory state while picking up externally added comments.
      */
-    private async mergeExternalComments() {
+    private async mergeExternalComments(): Promise<boolean> {
         try {
             const diskComments = await this.loadCommentsFromJsonl();
-            if (diskComments.length === 0) return;
+            if (diskComments.length === 0) return false;
 
             const memoryIds = new Set(
                 this.comments.map(c => c.id).filter((id): id is string => !!id)
@@ -1620,8 +1685,10 @@ export default class SideNote extends Plugin {
             if (changed) {
                 this.commentManager.updateComments(this.comments);
             }
+            return changed;
         } catch (e) {
             console.warn('SideNote: Failed to merge external comments', e);
+            return false;
         }
     }
 

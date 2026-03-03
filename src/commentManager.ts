@@ -12,6 +12,8 @@ export interface Comment {
     commentPath?: string; // Path to markdown-stored comment (optional)
     resolved?: boolean; // Whether comment is marked as resolved (hidden but preserved)
     resolvedAt?: number | null; // Timestamp when comment was resolved
+    type?: "selection" | "file"; // "file" = whole-file comment (no text anchor)
+    parentTimestamp?: number; // timestamp of parent comment (reply threading)
 }
 
 export class CommentManager {
@@ -75,7 +77,7 @@ export class CommentManager {
 
     addComment(newComment: Comment) {
         // Generate hash if not present
-        if (!newComment.selectedTextHash) {
+        if (!newComment.selectedTextHash && newComment.selectedText) {
             newComment.selectedTextHash = this.generateHash(newComment.selectedText);
         }
         this.comments.push(newComment);
@@ -93,6 +95,8 @@ export class CommentManager {
         if (indexToDelete > -1) {
             this.comments.splice(indexToDelete, 1);
         }
+        // Cascade: delete all replies to this comment
+        this.comments = this.comments.filter(c => c.parentTimestamp !== timestamp);
     }
 
     /**
@@ -100,10 +104,11 @@ export class CommentManager {
      * @param timestamp The timestamp of the comment to resolve
      */
     resolveComment(timestamp: number) {
-        const comment = this.comments.find(c => c.timestamp === timestamp);
-        if (comment) {
-            comment.resolved = true;
-            comment.resolvedAt = Date.now();
+        for (const c of this.comments) {
+            if (c.timestamp === timestamp || c.parentTimestamp === timestamp) {
+                c.resolved = true;
+                c.resolvedAt = Date.now();
+            }
         }
     }
 
@@ -112,10 +117,11 @@ export class CommentManager {
      * @param timestamp The timestamp of the comment to unresolve
      */
     unresolveComment(timestamp: number) {
-        const comment = this.comments.find(c => c.timestamp === timestamp);
-        if (comment) {
-            comment.resolved = false;
-            comment.resolvedAt = null;
+        for (const c of this.comments) {
+            if (c.timestamp === timestamp || c.parentTimestamp === timestamp) {
+                c.resolved = false;
+                c.resolvedAt = null;
+            }
         }
     }
 
@@ -428,6 +434,11 @@ export class CommentManager {
         const fileComments = this.comments.filter(comment => comment.filePath === filePath);
 
         fileComments.forEach(comment => {
+            // Skip file-level comments (no text anchoring needed)
+            if (comment.type === "file") {
+                return;
+            }
+
             // Skip if already marked as orphaned
             if (comment.isOrphaned) {
                 return;

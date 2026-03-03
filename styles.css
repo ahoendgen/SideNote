@@ -54,6 +54,40 @@
     padding: 10px;
 }
 
+/* Toolbar */
+.sidenote-toolbar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.sidenote-toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+    background-color: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.sidenote-toolbar-btn:hover {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+    border-color: var(--interactive-accent-hover);
+}
+
+.sidenote-toolbar-btn .svg-icon {
+    width: 14px;
+    height: 14px;
+}
+
 .sidenote-comment-item {
     padding: 12px 16px;
     margin-bottom: 12px;
@@ -78,6 +112,16 @@
 .sidenote-comment-item.resolved:hover {
     opacity: 0.8;
     background-color: var(--background-modifier-hover);
+}
+
+/* Threaded reply indentation */
+.sidenote-comment-item.sidenote-reply {
+    margin-left: 24px;
+    border-left: 2px solid var(--interactive-accent);
+}
+
+.sidenote-menu-reply {
+    color: var(--interactive-accent) !important;
 }
 
 .sidenote-comment-item.resolved .sidenote-selected-text {
@@ -110,6 +154,11 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.sidenote-file-comment-label {
+    font-style: italic;
+    color: var(--text-muted);
 }
 
 .sidenote-timestamp {
@@ -272,6 +321,257 @@
     border-color: var(--interactive-accent);
     box-shadow: 0 0 0 2px var(--interactive-accent-translucent);
 }
+/* Inline Comments Section (below note content) */
+.sidenote-inline-comments {
+    margin-top: 40px;
+    padding: 16px 0;
+    border-top: 1px solid var(--background-modifier-border);
+}
+
+.sidenote-inline-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-ui-small);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    user-select: none;
+}
+
+.sidenote-inline-header:hover {
+    color: var(--text-normal);
+}
+
+.sidenote-inline-collapse-icon {
+    display: flex;
+    align-items: center;
+}
+
+.sidenote-inline-collapse-icon .svg-icon {
+    width: 16px;
+    height: 16px;
+}
+
+.sidenote-inline-header-text {
+    flex-grow: 1;
+}
+
+.sidenote-inline-comments-list {
+    padding: 0 16px;
+}
+
+.sidenote-inline-comments-list.collapsed {
+    display: none;
+}
+
+/* Thread-style inline comments */
+.sidenote-inline-comments-list {
+    position: relative;
+    padding: 0 16px 0 28px;
+}
+
+/* Vertical thread line */
+.sidenote-inline-comments-list::before {
+    content: '';
+    position: absolute;
+    left: 22px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background-color: var(--background-modifier-border);
+    border-radius: 1px;
+}
+
+.sidenote-inline-comments .sidenote-comment-item {
+    position: relative;
+    padding: 6px 0 6px 16px;
+    margin-bottom: 0;
+    border-radius: 0;
+    border: none;
+    background: none;
+}
+
+/* Dot on the thread line */
+.sidenote-inline-comments .sidenote-comment-item::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 14px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--text-faint);
+    border: 2px solid var(--background-primary);
+    z-index: 1;
+}
+
+/* Hover: individual comment */
+.sidenote-inline-comments .sidenote-comment-item:hover {
+    background-color: var(--background-modifier-hover);
+    border-radius: 6px;
+    border: none;
+}
+
+.sidenote-inline-comments .sidenote-comment-item:hover::before {
+    background-color: var(--interactive-accent);
+}
+
+/* Thread group: own vertical line segment */
+.sidenote-thread-group {
+    position: relative;
+}
+
+/* Hover: entire thread group (parent + replies) */
+.sidenote-thread-group:hover > .sidenote-comment-item::before {
+    background-color: var(--interactive-accent);
+}
+
+.sidenote-thread-group:hover {
+    background-color: rgba(var(--interactive-accent-rgb, 99, 135, 210), 0.05);
+    border-radius: 8px;
+}
+
+/* Blue thread line on group hover */
+.sidenote-thread-group::before {
+    content: '';
+    position: absolute;
+    left: -6px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background-color: transparent;
+    border-radius: 1px;
+    z-index: 1;
+    transition: background-color 0.15s;
+}
+
+.sidenote-thread-group:hover::before {
+    background-color: var(--interactive-accent);
+}
+
+/* Reply branch connector turns blue on group hover */
+.sidenote-thread-group:hover .sidenote-comment-item.sidenote-reply::after {
+    background-color: var(--interactive-accent);
+}
+
+/* Individual hover within thread overrides group hover */
+.sidenote-thread-group .sidenote-comment-item:hover {
+    background-color: rgba(var(--interactive-accent-rgb, 99, 135, 210), 0.1);
+}
+
+/* Show menu on thread group hover */
+.sidenote-thread-group:hover .sidenote-menu-button {
+    opacity: 0.5;
+}
+
+.sidenote-thread-group .sidenote-comment-item:hover .sidenote-menu-button {
+    opacity: 1;
+}
+
+/* Hide selected text label, show only timestamp */
+.sidenote-inline-comments .sidenote-selected-text {
+    display: none;
+}
+
+.sidenote-inline-comments .sidenote-comment-header {
+    margin-bottom: 0;
+    align-items: center;
+}
+
+.sidenote-inline-comments .sidenote-timestamp {
+    font-size: var(--font-ui-smaller);
+    color: var(--text-faint);
+}
+
+.sidenote-inline-comments .sidenote-comment-content {
+    font-size: var(--font-ui-small);
+    line-height: 1.5;
+    color: var(--text-normal);
+}
+
+.sidenote-inline-comments .sidenote-comment-content p {
+    margin: 0;
+}
+
+/* Menu only on hover */
+.sidenote-inline-comments .sidenote-menu-button {
+    opacity: 0;
+    transition: opacity 0.15s;
+    font-size: var(--font-ui-smaller);
+    padding: 0 4px;
+}
+
+.sidenote-inline-comments .sidenote-comment-item:hover .sidenote-menu-button {
+    opacity: 1;
+}
+
+/* Reply branch */
+.sidenote-inline-comments .sidenote-comment-item.sidenote-reply {
+    margin-left: 16px;
+    padding-left: 16px;
+}
+
+.sidenote-inline-comments .sidenote-comment-item.sidenote-reply::before {
+    display: none;
+}
+
+/* Branch connector for replies */
+.sidenote-inline-comments .sidenote-comment-item.sidenote-reply::after {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 17px;
+    width: 8px;
+    height: 2px;
+    background-color: var(--background-modifier-border);
+}
+
+/* Quick-add comment input */
+.sidenote-inline-add {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    align-items: flex-end;
+}
+
+.sidenote-inline-add-input {
+    flex: 1;
+    resize: none;
+    overflow: hidden;
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    background-color: var(--background-primary);
+    color: var(--text-normal);
+    font-size: var(--font-ui-small);
+    font-family: inherit;
+    line-height: 1.4;
+}
+
+.sidenote-inline-add-input:focus {
+    border-color: var(--interactive-accent);
+    outline: none;
+}
+
+.sidenote-inline-add-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: var(--font-ui-small);
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Prevent inline comments from being editable in CM6 editor */
+.cm-sizer .sidenote-inline-comments {
+    pointer-events: auto;
+}
+
 /* Mobile responsive styles */
 @media (max-width: 768px) {
     .sidenote-comment-modal .modal-content {

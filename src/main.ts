@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, App, MarkdownView, Notice, ViewStateResult, Plugin, Modal, Setting, PluginSettingTab, editorLivePreviewField, MarkdownRenderer } from "obsidian";
+import { ItemView, WorkspaceLeaf, TFile, App, MarkdownView, Notice, ViewStateResult, Plugin, Modal, Setting, PluginSettingTab, editorLivePreviewField, MarkdownRenderer, setIcon } from "obsidian";
 import { Comment, CommentManager } from "./commentManager";
 import { EditorView, Decoration, DecorationSet, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { RangeSetBuilder, StateEffect } from "@codemirror/state";
@@ -46,11 +46,12 @@ interface SideNoteSettings {
     highlightColor: string;
     highlightOpacity: number;
     showResolvedComments: boolean; // Show resolved comments dimmed in the sidebar
+    showInlineComments: boolean; // Show comments section below note content
 }
 
 // Define a new interface for the entire plugin data
 interface PluginData extends SideNoteSettings {
-    comments: Comment[];
+    comments?: Comment[]; // optional: only present during migration from data.json
 }
 
 const DEFAULT_SETTINGS: SideNoteSettings = {
@@ -60,6 +61,7 @@ const DEFAULT_SETTINGS: SideNoteSettings = {
     highlightColor: "#FFC800",
     highlightOpacity: 0.2,
     showResolvedComments: false,
+    showInlineComments: true,
 };
 
 class SideNoteView extends ItemView {
@@ -87,6 +89,7 @@ class SideNoteView extends ItemView {
 
     async onOpen() {
         await Promise.resolve();
+
         // Set initial file to active file if not already set
         if (!this.file) {
             this.file = this.app.workspace.getActiveFile();
@@ -133,6 +136,23 @@ class SideNoteView extends ItemView {
         this.containerEl.empty();
         this.containerEl.addClass("sidenote-view-container");
         if (this.file) {
+            // Toolbar with add-comment buttons
+            const toolbar = this.containerEl.createDiv("sidenote-toolbar");
+
+            const addSelectionBtn = toolbar.createEl("button", { cls: "sidenote-toolbar-btn", attr: { "aria-label": "Add comment to selection" } });
+            setIcon(addSelectionBtn, "message-square-plus");
+            addSelectionBtn.createSpan({ text: "Selection" });
+            addSelectionBtn.onclick = () => {
+                (this.app as any).commands.executeCommandById("side-note-supercharged:add-comment-to-selection");
+            };
+
+            const addFileBtn = toolbar.createEl("button", { cls: "sidenote-toolbar-btn", attr: { "aria-label": "Add comment to file" } });
+            setIcon(addFileBtn, "file-plus");
+            addFileBtn.createSpan({ text: "File" });
+            addFileBtn.onclick = () => {
+                (this.app as any).commands.executeCommandById("side-note-supercharged:add-comment-to-file");
+            };
+
             let commentsForFile = this.plugin.commentManager.getCommentsForFile(this.file.path);
 
             // Filter out resolved comments unless showResolvedComments setting is enabled
@@ -154,8 +174,33 @@ class SideNoteView extends ItemView {
 
             if (commentsForFile.length > 0) {
                 const commentsContainer = this.containerEl.createDiv("sidenote-comments-container");
-                commentsForFile.forEach((comment) => {
+
+                // Group: root comments and replies
+                const rootComments = commentsForFile.filter(c => !c.parentTimestamp);
+                const repliesByParent = new Map<number, Comment[]>();
+                for (const c of commentsForFile) {
+                    if (c.parentTimestamp) {
+                        const arr = repliesByParent.get(c.parentTimestamp) || [];
+                        arr.push(c);
+                        repliesByParent.set(c.parentTimestamp, arr);
+                    }
+                }
+
+                // Build ordered list: root → replies
+                const orderedComments: { comment: Comment; isReply: boolean }[] = [];
+                for (const root of rootComments) {
+                    orderedComments.push({ comment: root, isReply: false });
+                    const replies = (repliesByParent.get(root.timestamp) || []).sort((a, b) => a.timestamp - b.timestamp);
+                    for (const reply of replies) {
+                        orderedComments.push({ comment: reply, isReply: true });
+                    }
+                }
+
+                orderedComments.forEach(({ comment, isReply }) => {
                     const commentEl = commentsContainer.createDiv("sidenote-comment-item");
+                    if (isReply) {
+                        commentEl.addClass("sidenote-reply");
+                    }
                     commentEl.setAttribute("data-comment-timestamp", comment.timestamp.toString());
 
                     // Add resolved class if comment is resolved
@@ -170,13 +215,26 @@ class SideNoteView extends ItemView {
 
                     const headerEl = commentEl.createDiv("sidenote-comment-header");
                     const textInfoEl = headerEl.createDiv("sidenote-comment-text-info");
-                    textInfoEl.createEl("h4", { text: comment.selectedText, cls: "sidenote-selected-text" });
+                    if (comment.type === "file") {
+                        textInfoEl.createEl("h4", { text: "File comment", cls: "sidenote-selected-text sidenote-file-comment-label" });
+                    } else {
+                        textInfoEl.createEl("h4", { text: comment.selectedText, cls: "sidenote-selected-text" });
+                    }
                     textInfoEl.createEl("small", { text: new Date(comment.timestamp).toLocaleString(), cls: "sidenote-timestamp" });
 
                     const actionsEl = headerEl.createDiv("sidenote-comment-actions");
 
                     // Clicking the comment jumps to its location in the file
                     commentEl.onclick = async () => {
+                        // File-level comments: just open/focus the file, no cursor positioning
+                        if (comment.type === "file") {
+                            const file = this.app.vault.getAbstractFileByPath(comment.filePath);
+                            if (file instanceof TFile) {
+                                await this.app.workspace.getLeaf(false).openFile(file);
+                            }
+                            return;
+                        }
+
                         let targetLeaf: WorkspaceLeaf | null = null;
                         // Try to find an existing Markdown view for the file
                         this.app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {
@@ -287,6 +345,28 @@ class SideNoteView extends ItemView {
                         }
                     };
 
+                    // Reply button
+                    const replyOption = menuContainer.createEl("button", { text: "Reply", cls: "sidenote-menu-option sidenote-menu-reply" });
+                    replyOption.onclick = (e) => {
+                        e.stopPropagation();
+                        menuContainer.classList.remove("visible");
+                        new CommentModal(this.app, (replyText) => {
+                            const reply: Comment = {
+                                filePath: comment.filePath,
+                                startLine: comment.startLine, startChar: comment.startChar,
+                                endLine: comment.endLine, endChar: comment.endChar,
+                                selectedText: comment.selectedText,
+                                selectedTextHash: comment.selectedTextHash,
+                                comment: replyText,
+                                timestamp: Date.now(),
+                                isOrphaned: false,
+                                type: comment.type,
+                                parentTimestamp: comment.parentTimestamp || comment.timestamp,
+                            };
+                            this.plugin.addComment(reply);
+                        }).open();
+                    };
+
                     menuButton.onclick = (e) => {
                         e.stopPropagation();
                         menuContainer.classList.toggle("visible");
@@ -300,7 +380,7 @@ class SideNoteView extends ItemView {
             } else {
                 const emptyStateEl = this.containerEl.createDiv("sidenote-empty-state");
                 emptyStateEl.createEl("p", { text: "No comments for this file yet." });
-                emptyStateEl.createEl("p", { text: "Select text in your note and use the 'add comment to selection' command to get started." });
+                emptyStateEl.createEl("p", { text: "Select text and use 'Add comment to selection', or use 'Add comment to file' to get started." });
             }
         } else {
             const emptyStateEl = this.containerEl.createDiv("sidenote-empty-state");
@@ -440,8 +520,6 @@ class CommentModal extends Modal {
             this.close();
         };
 
-        // Use both event handlers for maximum compatibility
-        cancelButton.onclick = handleCancel;
         cancelButton.addEventListener('click', handleCancel, false);
         cancelButton.addEventListener('touchstart', (e: TouchEvent) => {
             e.preventDefault();
@@ -468,8 +546,6 @@ class CommentModal extends Modal {
             await this.submitComment();
         };
 
-        // Use both event handlers for maximum compatibility
-        button.onclick = handleSubmit;
         button.addEventListener('click', handleSubmit, false);
         button.addEventListener('touchstart', (e: TouchEvent) => {
             e.preventDefault();
@@ -588,6 +664,19 @@ class SideNoteSettingTab extends PluginSettingTab {
             );
 
         new Setting(containerEl)
+            .setName("Show comments below note")
+            .setDesc("Display a comments section at the bottom of each note, inline with the document content.")
+            .addToggle((toggle) =>
+                toggle
+                    .setValue(this.plugin.settings.showInlineComments)
+                    .onChange(async (value: boolean) => {
+                        this.plugin.settings.showInlineComments = value;
+                        await this.plugin.saveData();
+                        this.plugin.inlineRenderer.updateAll();
+                    })
+            );
+
+        new Setting(containerEl)
             .setName("Highlight color")
             .setDesc("Choose the color for highlighted comments in the editor")
             .addColorPicker((colorPicker) =>
@@ -671,12 +760,357 @@ class SideNoteSettingTab extends PluginSettingTab {
     }
 }
 
+/**
+ * Renders a comments section at the bottom of note content.
+ * Injects into .markdown-preview-sizer (reading) or .cm-sizer (editor).
+ */
+class InlineCommentsRenderer {
+    private plugin: any; // SideNote (forward reference)
+    private containers: Map<string, HTMLElement> = new Map();
+
+    constructor(plugin: any) {
+        this.plugin = plugin;
+    }
+
+    updateAll() {
+        if (!this.plugin.settings.showInlineComments) {
+            this.removeAll();
+            return;
+        }
+        this.plugin.app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {
+            if (leaf.view instanceof MarkdownView) {
+                this.updateLeaf(leaf);
+            }
+        });
+    }
+
+    private updateLeaf(leaf: WorkspaceLeaf) {
+        const view = leaf.view as MarkdownView;
+        const file = view.file;
+        if (!file) return;
+
+        const leafId = (leaf as any).id as string || String(leaf.view.containerEl.getAttribute('data-sidenote-leaf') || Math.random());
+        // Tag the leaf for stable identification
+        if (!(leaf as any).id) {
+            leaf.view.containerEl.setAttribute('data-sidenote-leaf', leafId);
+        }
+
+        const mode = view.getMode(); // "source" or "preview"
+        const target = this.findInjectionTarget(view.containerEl, mode);
+        if (!target) return;
+
+        // Get or create container
+        let container = this.containers.get(leafId);
+        if (container && container.parentElement !== target) {
+            container.remove();
+            container = undefined;
+        }
+        if (!container) {
+            container = document.createElement('div');
+            container.className = 'sidenote-inline-comments';
+            container.setAttribute('contenteditable', 'false');
+            this.insertBeforeBacklinks(target, container);
+            this.containers.set(leafId, container);
+        }
+
+        // Re-inject if CodeMirror removed it
+        if (!container.parentElement) {
+            this.insertBeforeBacklinks(target, container);
+        }
+
+        this.renderInto(container, file.path);
+    }
+
+    private findInjectionTarget(containerEl: HTMLElement, mode: string): HTMLElement | null {
+        if (mode === "preview") {
+            return containerEl.querySelector('.markdown-preview-sizer');
+        } else {
+            return containerEl.querySelector('.cm-sizer');
+        }
+    }
+
+    /** Insert container before the backlinks section, or append at end if none exists */
+    private insertBeforeBacklinks(parent: HTMLElement, container: HTMLElement) {
+        const backlinks = parent.querySelector('.embedded-backlinks');
+        if (backlinks) {
+            parent.insertBefore(container, backlinks);
+        } else {
+            parent.appendChild(container);
+        }
+    }
+
+    private renderInto(container: HTMLElement, filePath: string) {
+        container.empty();
+
+        let comments = this.plugin.commentManager.getCommentsForFile(filePath);
+
+        if (!this.plugin.settings.showResolvedComments) {
+            comments = comments.filter((c: Comment) => !c.resolved);
+        }
+
+        container.style.display = '';
+
+        // Sort
+        if (this.plugin.settings.commentSortOrder === "position") {
+            comments.sort((a: Comment, b: Comment) => {
+                if (a.startLine === b.startLine) return a.startChar - b.startChar;
+                return a.startLine - b.startLine;
+            });
+        } else {
+            comments.sort((a: Comment, b: Comment) => a.timestamp - b.timestamp);
+        }
+
+        // Header with collapse (only if comments exist)
+        let commentsList: HTMLElement | null = null;
+        if (comments.length > 0) {
+            const header = container.createDiv('sidenote-inline-header');
+            const collapseIcon = header.createSpan('sidenote-inline-collapse-icon');
+            setIcon(collapseIcon, 'chevron-down');
+            header.createSpan({ text: `Comments (${comments.length})`, cls: 'sidenote-inline-header-text' });
+
+            commentsList = container.createDiv('sidenote-inline-comments-list');
+
+            header.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!commentsList) return;
+                const isCollapsed = commentsList.hasClass('collapsed');
+                if (isCollapsed) {
+                    commentsList.removeClass('collapsed');
+                    setIcon(collapseIcon, 'chevron-down');
+                } else {
+                    commentsList.addClass('collapsed');
+                    setIcon(collapseIcon, 'chevron-right');
+                }
+            });
+        }
+
+        // Quick-add input
+        const addForm = container.createDiv('sidenote-inline-add');
+        const addInput = addForm.createEl('textarea', { cls: 'sidenote-inline-add-input', attr: { placeholder: 'Add a comment...', rows: '1' } });
+        const addBtn = addForm.createEl('button', { text: 'Add', cls: 'sidenote-inline-add-btn mod-cta' });
+
+        // Auto-resize textarea
+        addInput.addEventListener('input', () => {
+            addInput.style.height = 'auto';
+            addInput.style.height = addInput.scrollHeight + 'px';
+        });
+
+        // Prevent editor from stealing keystrokes (capture phase to beat CM6)
+        addInput.addEventListener('keydown', (e: KeyboardEvent) => {
+            e.stopPropagation();
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                submitComment();
+            }
+        }, true);
+
+        const submitComment = () => {
+            const text = addInput.value.trim();
+            if (!text) return;
+            const newComment: Comment = {
+                filePath: filePath,
+                startLine: 0, startChar: 0, endLine: 0, endChar: 0,
+                selectedText: "", selectedTextHash: "",
+                comment: text,
+                timestamp: Date.now(),
+                isOrphaned: false,
+                type: "file",
+            };
+            this.plugin.addComment(newComment);
+        };
+
+        addBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            submitComment();
+        });
+
+        // Render comments grouped: root → replies
+        if (commentsList) {
+            const rootComments = comments.filter((c: Comment) => !c.parentTimestamp);
+            const repliesByParent = new Map<number, Comment[]>();
+            for (const c of comments) {
+                if (c.parentTimestamp) {
+                    const arr = repliesByParent.get(c.parentTimestamp) || [];
+                    arr.push(c);
+                    repliesByParent.set(c.parentTimestamp, arr);
+                }
+            }
+            for (const root of rootComments) {
+                const replies = (repliesByParent.get(root.timestamp) || []).sort((a: Comment, b: Comment) => a.timestamp - b.timestamp);
+                if (replies.length > 0) {
+                    // Wrap root + replies in a thread group for hover
+                    const threadGroup = commentsList.createDiv('sidenote-thread-group');
+                    this.renderCommentItem(threadGroup, root);
+                    for (const reply of replies) {
+                        this.renderCommentItem(threadGroup, reply, true);
+                    }
+                } else {
+                    this.renderCommentItem(commentsList, root);
+                }
+            }
+        }
+    }
+
+    private renderCommentItem(parent: HTMLElement, comment: Comment, isReply: boolean = false) {
+        const commentEl = parent.createDiv('sidenote-comment-item');
+        if (isReply) {
+            commentEl.addClass('sidenote-reply');
+        }
+        commentEl.setAttribute('data-comment-timestamp', comment.timestamp.toString());
+
+        if (comment.resolved) {
+            commentEl.addClass('resolved');
+        }
+
+        const headerEl = commentEl.createDiv('sidenote-comment-header');
+        const textInfoEl = headerEl.createDiv('sidenote-comment-text-info');
+
+        if (comment.type === "file") {
+            textInfoEl.createEl('h4', { text: 'File comment', cls: 'sidenote-selected-text sidenote-file-comment-label' });
+        } else {
+            textInfoEl.createEl('h4', { text: comment.selectedText, cls: 'sidenote-selected-text' });
+        }
+        textInfoEl.createEl('small', { text: new Date(comment.timestamp).toLocaleString(), cls: 'sidenote-timestamp' });
+
+        const actionsEl = headerEl.createDiv('sidenote-comment-actions');
+
+        // Menu button
+        const menuButton = actionsEl.createEl('button', { text: '...', cls: 'sidenote-menu-button' });
+        const menuContainer = actionsEl.createDiv('sidenote-action-menu');
+
+        const editOption = menuContainer.createEl('button', { text: 'Edit', cls: 'sidenote-menu-option sidenote-menu-edit' });
+        editOption.onclick = (e) => {
+            e.stopPropagation();
+            menuContainer.classList.remove('visible');
+            new CommentModal(this.plugin.app, (editedComment: string) => {
+                this.plugin.editComment(comment.timestamp, editedComment);
+            }, comment.comment).open();
+        };
+
+        const deleteOption = menuContainer.createEl('button', { text: 'Delete', cls: 'sidenote-menu-option sidenote-menu-delete' });
+        deleteOption.onclick = (e) => {
+            e.stopPropagation();
+            menuContainer.classList.remove('visible');
+            new ConfirmDeleteModal(this.plugin.app, () => {
+                this.plugin.deleteComment(comment.timestamp);
+            }).open();
+        };
+
+        const resolveOption = menuContainer.createEl('button', {
+            text: comment.resolved ? 'Reopen' : 'Resolve',
+            cls: 'sidenote-menu-option sidenote-menu-resolve'
+        });
+        resolveOption.onclick = (e) => {
+            e.stopPropagation();
+            menuContainer.classList.remove('visible');
+            if (comment.resolved) {
+                this.plugin.unresolveComment(comment.timestamp);
+            } else {
+                this.plugin.resolveComment(comment.timestamp);
+            }
+        };
+
+        // Reply button
+        const replyOption = menuContainer.createEl('button', { text: 'Reply', cls: 'sidenote-menu-option sidenote-menu-reply' });
+        replyOption.onclick = (e) => {
+            e.stopPropagation();
+            menuContainer.classList.remove('visible');
+            new CommentModal(this.plugin.app, (replyText: string) => {
+                const reply: Comment = {
+                    filePath: comment.filePath,
+                    startLine: comment.startLine, startChar: comment.startChar,
+                    endLine: comment.endLine, endChar: comment.endChar,
+                    selectedText: comment.selectedText,
+                    selectedTextHash: comment.selectedTextHash,
+                    comment: replyText,
+                    timestamp: Date.now(),
+                    isOrphaned: false,
+                    type: comment.type,
+                    parentTimestamp: comment.parentTimestamp || comment.timestamp,
+                };
+                this.plugin.addComment(reply);
+            }).open();
+        };
+
+        menuButton.onclick = (e) => {
+            e.stopPropagation();
+            menuContainer.classList.toggle('visible');
+        };
+
+        // Close menu on outside click
+        document.addEventListener('click', () => {
+            menuContainer.classList.remove('visible');
+        });
+
+        // Click to jump to text location (selection comments only)
+        commentEl.onclick = async () => {
+            if (comment.type === "file") return;
+
+            let targetLeaf: WorkspaceLeaf | null = null;
+            this.plugin.app.workspace.iterateAllLeaves((leaf: WorkspaceLeaf) => {
+                if (leaf.view instanceof MarkdownView && leaf.view.file?.path === comment.filePath) {
+                    targetLeaf = leaf;
+                    return false;
+                }
+            });
+
+            if (targetLeaf && (targetLeaf as any).view instanceof MarkdownView) {
+                this.plugin.app.workspace.setActiveLeaf(targetLeaf, { focus: true });
+                const editor = ((targetLeaf as any).view as MarkdownView).editor;
+                editor.setSelection(
+                    { line: comment.startLine, ch: comment.startChar },
+                    { line: comment.endLine, ch: comment.endChar }
+                );
+                editor.scrollIntoView({
+                    from: { line: comment.startLine, ch: 0 },
+                    to: { line: comment.endLine, ch: 0 }
+                }, true);
+                editor.focus();
+            }
+        };
+
+        // Render markdown content
+        const contentWrapper = commentEl.createDiv({ cls: 'sidenote-comment-content' });
+        MarkdownRenderer.renderMarkdown(
+            comment.comment || '',
+            contentWrapper,
+            comment.filePath,
+            this.plugin
+        );
+
+        // Internal link handling
+        contentWrapper.addEventListener('click', (event: MouseEvent) => {
+            const target = event.target as HTMLElement | null;
+            const link = target?.closest('a.internal-link') as HTMLElement | null;
+            if (!link) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const href = link.getAttribute('href') || link.getAttribute('data-href') || link.innerText;
+            if (href) {
+                this.plugin.app.workspace.openLinkText(href, comment.filePath, false);
+            }
+        });
+    }
+
+    removeAll() {
+        this.containers.forEach((container) => {
+            container.remove();
+        });
+        this.containers.clear();
+    }
+
+    destroy() {
+        this.removeAll();
+    }
+}
+
 // Main plugin class
 export default class SideNote extends Plugin {
     commentManager: CommentManager;
     settings: SideNoteSettings;
     comments: Comment[] = [];
     private editorUpdateTimers: Record<string, number> = {};
+    inlineRenderer: InlineCommentsRenderer;
 
     /** Ensure markdown comment folder exists and return normalized path */
     private async ensureCommentFolder(): Promise<string> {
@@ -764,6 +1198,12 @@ export default class SideNote extends Plugin {
         // Also highlight commented text inside rendered Markdown (Live Preview/Reading view)
         this.registerMarkdownPreviewHighlights();
 
+        // Initialize inline comments renderer
+        this.inlineRenderer = new InlineCommentsRenderer(this);
+        this.app.workspace.onLayoutReady(() => {
+            this.inlineRenderer.updateAll();
+        });
+
         this.addSettingTab(new SideNoteSettingTab(this.app, this));
 
         this.registerView("sidenote-view", (leaf) => new SideNoteView(leaf, this));
@@ -818,10 +1258,40 @@ export default class SideNote extends Plugin {
             },
         });
 
-        // Add context menu item to editor
+        this.addCommand({
+            id: "add-comment-to-file",
+            name: "Add comment to file",
+            icon: "file-plus",
+            callback: async () => {
+                const activeFile = this.app.workspace.getActiveFile();
+                if (!activeFile) {
+                    new Notice("No active file to comment on.");
+                    return;
+                }
+                const filePath = activeFile.path;
+                new CommentModal(this.app, async (commentText) => {
+                    const newComment: Comment = {
+                        filePath: filePath,
+                        startLine: 0,
+                        startChar: 0,
+                        endLine: 0,
+                        endChar: 0,
+                        selectedText: "",
+                        selectedTextHash: "",
+                        comment: commentText,
+                        timestamp: Date.now(),
+                        isOrphaned: false,
+                        type: "file",
+                    };
+                    this.addComment(newComment);
+                }).open();
+            },
+        });
+
+        // Add context menu items to editor
         this.registerEvent(
             this.app.workspace.on('editor-menu', (menu, editor, view) => {
-                // Only add if selection exists
+                // Selection comment (only when text is selected)
                 if (editor.somethingSelected()) {
                     menu.addItem((item) => {
                         item.setTitle("Add comment to selection")
@@ -856,6 +1326,34 @@ export default class SideNote extends Plugin {
                             });
                     });
                 }
+                // File comment (always available)
+                menu.addItem((item) => {
+                    item.setTitle("Add comment to file")
+                        .setIcon("file-plus")
+                        .onClick(async () => {
+                            const filePath = view.file?.path;
+                            if (!filePath) {
+                                new Notice("No file to comment on.");
+                                return;
+                            }
+                            new CommentModal(this.app, async (commentText) => {
+                                const newComment: Comment = {
+                                    filePath: filePath,
+                                    startLine: 0,
+                                    startChar: 0,
+                                    endLine: 0,
+                                    endChar: 0,
+                                    selectedText: "",
+                                    selectedTextHash: "",
+                                    comment: commentText,
+                                    timestamp: Date.now(),
+                                    isOrphaned: false,
+                                    type: "file",
+                                };
+                                this.addComment(newComment);
+                            }).open();
+                        });
+                });
             })
         );
 
@@ -878,6 +1376,15 @@ export default class SideNote extends Plugin {
                     // Refresh editor decorations for the newly active file
                     this.refreshEditorDecorations();
                 }
+                // Update inline comments
+                this.inlineRenderer.updateAll();
+            })
+        );
+
+        // Re-inject inline comments on layout changes (mode switches, pane resizes)
+        this.registerEvent(
+            this.app.workspace.on('layout-change', () => {
+                this.inlineRenderer.updateAll();
             })
         );
 
@@ -960,6 +1467,10 @@ export default class SideNote extends Plugin {
         );
     }
 
+    onunload() {
+        this.inlineRenderer.destroy();
+    }
+
     /**
      * Activate the Side Note view and highlight a specific comment
      */
@@ -1015,6 +1526,8 @@ export default class SideNote extends Plugin {
         });
         // Force immediate refresh of editor decorations
         this.refreshEditorDecorations();
+        // Update inline comments below note content
+        this.inlineRenderer.updateAll();
         new Notice(message);
     }
 
@@ -1046,8 +1559,25 @@ export default class SideNote extends Plugin {
         void this.onCommentsChanged("Comment reopened!");
     }
 
+    private getCommentsFilePath(): string {
+        return `${this.manifest.dir}/comments.jsonl`;
+    }
+
+    private async saveComments() {
+        const lines = this.comments.map(c => JSON.stringify(c));
+        await this.app.vault.adapter.write(this.getCommentsFilePath(), lines.join('\n'));
+    }
+
+    private async loadCommentsFromJsonl(): Promise<Comment[]> {
+        const path = this.getCommentsFilePath();
+        if (!(await this.app.vault.adapter.exists(path))) return [];
+        const content = await this.app.vault.adapter.read(path);
+        if (!content.trim()) return [];
+        return content.trim().split('\n').map(line => JSON.parse(line));
+    }
+
     async loadPluginData() {
-        const loadedData: PluginData = Object.assign({}, { comments: [] }, DEFAULT_SETTINGS, await this.loadData());
+        const loadedData: PluginData = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
         this.settings = {
             commentSortOrder: loadedData.commentSortOrder || DEFAULT_SETTINGS.commentSortOrder,
             showHighlights: loadedData.showHighlights !== undefined ? loadedData.showHighlights : DEFAULT_SETTINGS.showHighlights,
@@ -1055,8 +1585,20 @@ export default class SideNote extends Plugin {
             highlightColor: loadedData.highlightColor || DEFAULT_SETTINGS.highlightColor,
             highlightOpacity: loadedData.highlightOpacity !== undefined ? loadedData.highlightOpacity : DEFAULT_SETTINGS.highlightOpacity,
             showResolvedComments: loadedData.showResolvedComments !== undefined ? loadedData.showResolvedComments : DEFAULT_SETTINGS.showResolvedComments,
+            showInlineComments: loadedData.showInlineComments !== undefined ? loadedData.showInlineComments : DEFAULT_SETTINGS.showInlineComments,
         };
-        this.comments = loadedData.comments || [];
+
+        // Load comments from JSONL
+        this.comments = await this.loadCommentsFromJsonl();
+
+        // Migrate from data.json if JSONL is empty but data.json has comments
+        if (this.comments.length === 0 && loadedData.comments && loadedData.comments.length > 0) {
+            this.comments = loadedData.comments;
+            await this.saveComments();
+            // Remove comments from data.json by re-saving settings only
+            await super.saveData({ ...this.settings });
+        }
+
         // Apply highlight color on load
         this.applyHighlightColor();
     }
@@ -1120,7 +1662,7 @@ export default class SideNote extends Plugin {
 
             const comments = this.commentManager
                 .getCommentsForFile(context.sourcePath)
-                .filter(c => !c.isOrphaned && !!c.selectedText);
+                .filter(c => !c.isOrphaned && !!c.selectedText && c.type !== "file");
 
             if (!comments.length) return;
 
@@ -1247,11 +1789,10 @@ export default class SideNote extends Plugin {
     }
 
     async saveData() {
-        const dataToSave: PluginData = {
-            ...this.settings,
-            comments: this.comments,
-        };
-        await super.saveData(dataToSave);
+        // Settings in data.json (no comments)
+        await super.saveData({ ...this.settings });
+        // Comments in JSONL
+        await this.saveComments();
         // Refresh editor decorations when data changes
         this.refreshEditorDecorations();
     }
@@ -1344,6 +1885,11 @@ export default class SideNote extends Plugin {
                 const comments = plugin.commentManager.getCommentsForFile(filePath);
 
                 comments.forEach(comment => {
+                    // Skip file-level comments (no text to highlight)
+                    if (comment.type === "file") {
+                        return;
+                    }
+
                     // Skip resolved comments (don't show highlights for resolved items)
                     if (comment.resolved) {
                         return;

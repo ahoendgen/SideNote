@@ -84,42 +84,34 @@ export class CommentManager {
         this.comments.push(newComment);
     }
 
-    editComment(timestamp: number, newCommentText: string) {
-        const commentToEdit = this.comments.find(comment => comment.timestamp === timestamp);
+    editComment(id: string, newCommentText: string) {
+        const commentToEdit = this.comments.find(comment => comment.id === id);
         if (commentToEdit) {
             commentToEdit.comment = newCommentText;
         }
     }
 
-    deleteComment(timestamp: number) {
-        const indexToDelete = this.comments.findIndex(comment => comment.timestamp === timestamp);
+    deleteComment(id: string) {
+        const indexToDelete = this.comments.findIndex(comment => comment.id === id);
         if (indexToDelete > -1) {
             this.comments.splice(indexToDelete, 1);
         }
         // Cascade: delete all replies to this comment
-        this.comments = this.comments.filter(c => c.parentTimestamp !== timestamp);
+        this.comments = this.comments.filter(c => c.parentId !== id);
     }
 
-    /**
-     * Mark a comment as resolved (hidden but preserved for audit trail)
-     * @param timestamp The timestamp of the comment to resolve
-     */
-    resolveComment(timestamp: number) {
+    resolveComment(id: string) {
         for (const c of this.comments) {
-            if (c.timestamp === timestamp || c.parentTimestamp === timestamp) {
+            if (c.id === id || c.parentId === id) {
                 c.resolved = true;
                 c.resolvedAt = Date.now();
             }
         }
     }
 
-    /**
-     * Mark a comment as unresolved (reopened)
-     * @param timestamp The timestamp of the comment to unresolve
-     */
-    unresolveComment(timestamp: number) {
+    unresolveComment(id: string) {
         for (const c of this.comments) {
-            if (c.timestamp === timestamp || c.parentTimestamp === timestamp) {
+            if (c.id === id || c.parentId === id) {
                 c.resolved = false;
                 c.resolvedAt = null;
             }

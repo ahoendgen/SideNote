@@ -68,7 +68,7 @@ const DEFAULT_SETTINGS: SideNoteSettings = {
 class SideNoteView extends ItemView {
     private file: TFile | null = null;
     private plugin: SideNote;
-    private activeCommentTimestamp: number | null = null;
+    private activeCommentId: string | null = null;
 
     constructor(leaf: WorkspaceLeaf, plugin: SideNote, file: TFile | null = null) {
         super(leaf);
@@ -121,12 +121,12 @@ class SideNoteView extends ItemView {
     /**
      * Highlight and scroll to a specific comment
      */
-    public highlightComment(timestamp: number) {
-        this.activeCommentTimestamp = timestamp;
+    public highlightComment(id: string) {
+        this.activeCommentId = id;
         this.renderComments();
         // Scroll to the highlighted comment
         setTimeout(() => {
-            const commentEl = this.containerEl.querySelector(`[data-comment-timestamp="${timestamp}"]`);
+            const commentEl = this.containerEl.querySelector(`[data-comment-id="${id}"]`);
             if (commentEl) {
                 commentEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
@@ -177,13 +177,13 @@ class SideNoteView extends ItemView {
                 const commentsContainer = this.containerEl.createDiv("sidenote-comments-container");
 
                 // Group: root comments and replies
-                const rootComments = commentsForFile.filter(c => !c.parentTimestamp);
-                const repliesByParent = new Map<number, Comment[]>();
+                const rootComments = commentsForFile.filter(c => !c.parentId);
+                const repliesByParent = new Map<string, Comment[]>();
                 for (const c of commentsForFile) {
-                    if (c.parentTimestamp) {
-                        const arr = repliesByParent.get(c.parentTimestamp) || [];
+                    if (c.parentId) {
+                        const arr = repliesByParent.get(c.parentId) || [];
                         arr.push(c);
-                        repliesByParent.set(c.parentTimestamp, arr);
+                        repliesByParent.set(c.parentId, arr);
                     }
                 }
 
@@ -191,7 +191,7 @@ class SideNoteView extends ItemView {
                 const orderedComments: { comment: Comment; isReply: boolean }[] = [];
                 for (const root of rootComments) {
                     orderedComments.push({ comment: root, isReply: false });
-                    const replies = (repliesByParent.get(root.timestamp) || []).sort((a, b) => a.timestamp - b.timestamp);
+                    const replies = (repliesByParent.get(root.id!) || []).sort((a, b) => a.timestamp - b.timestamp);
                     for (const reply of replies) {
                         orderedComments.push({ comment: reply, isReply: true });
                     }
@@ -202,7 +202,7 @@ class SideNoteView extends ItemView {
                     if (isReply) {
                         commentEl.addClass("sidenote-reply");
                     }
-                    commentEl.setAttribute("data-comment-timestamp", comment.timestamp.toString());
+                    commentEl.setAttribute("data-comment-id", comment.id || "");
 
                     // Add resolved class if comment is resolved
                     if (comment.resolved) {
@@ -210,7 +210,7 @@ class SideNoteView extends ItemView {
                     }
 
                     // Highlight active comment
-                    if (this.activeCommentTimestamp === comment.timestamp) {
+                    if (this.activeCommentId === comment.id) {
                         commentEl.addClass("active");
                     }
 
@@ -318,7 +318,7 @@ class SideNoteView extends ItemView {
                         e.stopPropagation();
                         menuContainer.classList.remove("visible");
                         new CommentModal(this.app, (editedComment) => {
-                            this.plugin.editComment(comment.timestamp, editedComment);
+                            this.plugin.editComment(comment.id!, editedComment);
                         }, comment.comment).open();
                     };
 
@@ -327,7 +327,7 @@ class SideNoteView extends ItemView {
                         e.stopPropagation();
                         menuContainer.classList.remove("visible");
                         new ConfirmDeleteModal(this.app, () => {
-                            this.plugin.deleteComment(comment.timestamp);
+                            this.plugin.deleteComment(comment.id!);
                         }).open();
                     };
 
@@ -340,9 +340,9 @@ class SideNoteView extends ItemView {
                         e.stopPropagation();
                         menuContainer.classList.remove("visible");
                         if (comment.resolved) {
-                            this.plugin.unresolveComment(comment.timestamp);
+                            this.plugin.unresolveComment(comment.id!);
                         } else {
-                            this.plugin.resolveComment(comment.timestamp);
+                            this.plugin.resolveComment(comment.id!);
                         }
                     };
 
@@ -352,17 +352,20 @@ class SideNoteView extends ItemView {
                         e.stopPropagation();
                         menuContainer.classList.remove("visible");
                         new CommentModal(this.app, (replyText) => {
+                            const rootId = comment.parentId || comment.id!;
+                            const root = this.plugin.comments.find((c: Comment) => c.id === rootId) || comment;
                             const reply: Comment = {
-                                filePath: comment.filePath,
-                                startLine: comment.startLine, startChar: comment.startChar,
-                                endLine: comment.endLine, endChar: comment.endChar,
-                                selectedText: comment.selectedText,
-                                selectedTextHash: comment.selectedTextHash,
+                                filePath: root.filePath,
+                                startLine: root.startLine, startChar: root.startChar,
+                                endLine: root.endLine, endChar: root.endChar,
+                                selectedText: root.selectedText,
+                                selectedTextHash: root.selectedTextHash,
                                 comment: replyText,
                                 timestamp: Date.now(),
                                 isOrphaned: false,
-                                type: comment.type,
-                                parentTimestamp: comment.parentTimestamp || comment.timestamp,
+                                type: root.type,
+                                parentTimestamp: root.timestamp,
+                                parentId: rootId,
                             };
                             this.plugin.addComment(reply);
                         }).open();
@@ -927,17 +930,17 @@ class InlineCommentsRenderer {
 
         // Render comments grouped: root → replies
         if (commentsList) {
-            const rootComments = comments.filter((c: Comment) => !c.parentTimestamp);
-            const repliesByParent = new Map<number, Comment[]>();
+            const rootComments = comments.filter((c: Comment) => !c.parentId);
+            const repliesByParent = new Map<string, Comment[]>();
             for (const c of comments) {
-                if (c.parentTimestamp) {
-                    const arr = repliesByParent.get(c.parentTimestamp) || [];
+                if (c.parentId) {
+                    const arr = repliesByParent.get(c.parentId) || [];
                     arr.push(c);
-                    repliesByParent.set(c.parentTimestamp, arr);
+                    repliesByParent.set(c.parentId, arr);
                 }
             }
             for (const root of rootComments) {
-                const replies = (repliesByParent.get(root.timestamp) || []).sort((a: Comment, b: Comment) => a.timestamp - b.timestamp);
+                const replies = (repliesByParent.get(root.id!) || []).sort((a: Comment, b: Comment) => a.timestamp - b.timestamp);
                 if (replies.length > 0) {
                     // Wrap root + replies in a thread group for hover
                     const threadGroup = commentsList.createDiv('sidenote-thread-group');
@@ -957,7 +960,7 @@ class InlineCommentsRenderer {
         if (isReply) {
             commentEl.addClass('sidenote-reply');
         }
-        commentEl.setAttribute('data-comment-timestamp', comment.timestamp.toString());
+        commentEl.setAttribute('data-comment-id', comment.id || "");
 
         if (comment.resolved) {
             commentEl.addClass('resolved');
@@ -984,7 +987,7 @@ class InlineCommentsRenderer {
             e.stopPropagation();
             menuContainer.classList.remove('visible');
             new CommentModal(this.plugin.app, (editedComment: string) => {
-                this.plugin.editComment(comment.timestamp, editedComment);
+                this.plugin.editComment(comment.id!, editedComment);
             }, comment.comment).open();
         };
 
@@ -993,7 +996,7 @@ class InlineCommentsRenderer {
             e.stopPropagation();
             menuContainer.classList.remove('visible');
             new ConfirmDeleteModal(this.plugin.app, () => {
-                this.plugin.deleteComment(comment.timestamp);
+                this.plugin.deleteComment(comment.id!);
             }).open();
         };
 
@@ -1005,9 +1008,9 @@ class InlineCommentsRenderer {
             e.stopPropagation();
             menuContainer.classList.remove('visible');
             if (comment.resolved) {
-                this.plugin.unresolveComment(comment.timestamp);
+                this.plugin.unresolveComment(comment.id!);
             } else {
-                this.plugin.resolveComment(comment.timestamp);
+                this.plugin.resolveComment(comment.id!);
             }
         };
 
@@ -1017,17 +1020,20 @@ class InlineCommentsRenderer {
             e.stopPropagation();
             menuContainer.classList.remove('visible');
             new CommentModal(this.plugin.app, (replyText: string) => {
+                const rootId = comment.parentId || comment.id!;
+                const root = this.plugin.comments.find((c: Comment) => c.id === rootId) || comment;
                 const reply: Comment = {
-                    filePath: comment.filePath,
-                    startLine: comment.startLine, startChar: comment.startChar,
-                    endLine: comment.endLine, endChar: comment.endChar,
-                    selectedText: comment.selectedText,
-                    selectedTextHash: comment.selectedTextHash,
+                    filePath: root.filePath,
+                    startLine: root.startLine, startChar: root.startChar,
+                    endLine: root.endLine, endChar: root.endChar,
+                    selectedText: root.selectedText,
+                    selectedTextHash: root.selectedTextHash,
                     comment: replyText,
                     timestamp: Date.now(),
                     isOrphaned: false,
-                    type: comment.type,
-                    parentTimestamp: comment.parentTimestamp || comment.timestamp,
+                    type: root.type,
+                    parentTimestamp: root.timestamp,
+                    parentId: rootId,
                 };
                 this.plugin.addComment(reply);
             }).open();
@@ -1133,16 +1139,16 @@ export default class SideNote extends Plugin {
     }
 
     /** Build markdown block with marker */
-    private buildMarkdownBlock(excerpt: string, body: string, timestamp: number): string {
+    private buildMarkdownBlock(excerpt: string, body: string, id: string): string {
         const safeExcerpt = excerpt || "(no excerpt)";
-        return `## ${safeExcerpt}\n<!-- side-note:${timestamp} -->\n${body}\n\n---`;
+        return `## ${safeExcerpt}\n<!-- side-note:${id} -->\n${body}\n\n---`;
     }
 
     /** Write or append comment to markdown file and return path */
-    private async writeCommentToMarkdown(notePath: string, excerpt: string, body: string, timestamp: number): Promise<string> {
+    private async writeCommentToMarkdown(notePath: string, excerpt: string, body: string, id: string): Promise<string> {
         const folder = await this.ensureCommentFolder();
         const filePath = this.getSideNoteFilePath(notePath);
-        const block = this.buildMarkdownBlock(excerpt, body, timestamp);
+        const block = this.buildMarkdownBlock(excerpt, body, id);
 
         const existing = this.app.vault.getAbstractFileByPath(filePath);
         if (existing instanceof TFile) {
@@ -1163,11 +1169,11 @@ export default class SideNote extends Plugin {
         const file = this.app.vault.getAbstractFileByPath(filePath);
         if (!(file instanceof TFile)) return;
         const content = await this.app.vault.read(file);
-        const marker = `<!-- side-note:${comment.timestamp} -->`;
+        const marker = `<!-- side-note:${comment.id} -->`;
         // Match from heading line through marker and body up to next --- separator or EOF
         const blockRegex = new RegExp(`(^|\n)## .*?\n${marker}\n[^]*?(?=\n---\n|$)`, "m");
         if (!blockRegex.test(content)) return;
-        const replacement = this.buildMarkdownBlock(comment.selectedText, newBody, comment.timestamp);
+        const replacement = this.buildMarkdownBlock(comment.selectedText, newBody, comment.id!);
         const updated = content.replace(blockRegex, replacement);
         await this.app.vault.modify(file, updated);
     }
@@ -1178,7 +1184,7 @@ export default class SideNote extends Plugin {
         const file = this.app.vault.getAbstractFileByPath(filePath);
         if (!(file instanceof TFile)) return;
         const content = await this.app.vault.read(file);
-        const marker = `<!-- side-note:${comment.timestamp} -->`;
+        const marker = `<!-- side-note:${comment.id} -->`;
         // Remove the matched block; allow beginning-of-file and Windows newlines
         const blockRegex = new RegExp(`(^|\n)## .*?\n${marker}\n[^]*?(?:\n---\n|$)`, "m");
         if (!blockRegex.test(content)) return;
@@ -1476,13 +1482,13 @@ export default class SideNote extends Plugin {
     /**
      * Activate the Side Note view and highlight a specific comment
      */
-    async activateViewAndHighlightComment(timestamp: number) {
+    async activateViewAndHighlightComment(id: string) {
         await this.activateView();
         // Find the SideNoteView and highlight the comment
         const leaves = this.app.workspace.getLeavesOfType("sidenote-view");
         leaves.forEach(leaf => {
             if (leaf.view instanceof SideNoteView) {
-                leaf.view.highlightComment(timestamp);
+                leaf.view.highlightComment(id);
             }
         });
     }
@@ -1538,26 +1544,23 @@ export default class SideNote extends Plugin {
         void this.onCommentsChanged("Comment added!");
     }
 
-    async editComment(timestamp: number, newCommentText: string) {
-        const existing = this.commentManager.getComments().find(c => c.timestamp === timestamp);
-        if (existing) {
-            existing.comment = newCommentText;
-        }
+    async editComment(id: string, newCommentText: string) {
+        this.commentManager.editComment(id, newCommentText);
         void this.onCommentsChanged("Comment updated!");
     }
 
-    async deleteComment(timestamp: number) {
-        this.commentManager.deleteComment(timestamp);
+    async deleteComment(id: string) {
+        this.commentManager.deleteComment(id);
         void this.onCommentsChanged("Comment deleted!");
     }
 
-    async resolveComment(timestamp: number) {
-        this.commentManager.resolveComment(timestamp);
+    async resolveComment(id: string) {
+        this.commentManager.resolveComment(id);
         void this.onCommentsChanged("Comment resolved!");
     }
 
-    async unresolveComment(timestamp: number) {
-        this.commentManager.unresolveComment(timestamp);
+    async unresolveComment(id: string) {
+        this.commentManager.unresolveComment(id);
         void this.onCommentsChanged("Comment reopened!");
     }
 
@@ -1659,7 +1662,7 @@ export default class SideNote extends Plugin {
         let changed = false;
         for (const comment of this.comments) {
             if (!comment.commentPath) {
-                const path = await this.writeCommentToMarkdown(comment.filePath, comment.selectedText, comment.comment, comment.timestamp);
+                const path = await this.writeCommentToMarkdown(comment.filePath, comment.selectedText, comment.comment, comment.id!);
                 comment.commentPath = path;
                 changed = true;
             }
@@ -1749,11 +1752,11 @@ export default class SideNote extends Plugin {
 
                     const span = document.createElement('span');
                     span.classList.add('sidenote-highlight', 'sidenote-highlight-preview');
-                    span.dataset.commentTimestamp = wrap.comment.timestamp.toString();
+                    span.dataset.commentId = wrap.comment.id || "";
                     span.addEventListener('click', (event: MouseEvent) => {
                         // Only handle primary button clicks; let other interactions (context menu, selections) flow
                         if (event.button !== 0) return;
-                        void this.activateViewAndHighlightComment(wrap.comment.timestamp);
+                        void this.activateViewAndHighlightComment(wrap.comment.id!);
                     });
 
                     // Ensure browser/Obsidian context menus still work on right-click
@@ -1866,11 +1869,9 @@ export default class SideNote extends Plugin {
                 // Check if clicked on a highlight
                 const highlight = target.closest('.sidenote-highlight');
                 if (highlight) {
-                    const timestampStr = highlight.getAttribute('data-comment-timestamp');
-                    if (timestampStr) {
-                        const timestamp = parseInt(timestampStr, 10);
-                        // Open sidebar if not open and highlight the comment
-                        plugin.activateViewAndHighlightComment(timestamp);
+                    const commentId = highlight.getAttribute('data-comment-id');
+                    if (commentId) {
+                        plugin.activateViewAndHighlightComment(commentId);
                     }
                 }
             }
@@ -1939,7 +1940,7 @@ export default class SideNote extends Plugin {
                                         decoration: Decoration.mark({
                                             class: 'sidenote-highlight',
                                             attributes: {
-                                                'data-comment-timestamp': comment.timestamp.toString()
+                                                'data-comment-id': comment.id || ""
                                             }
                                         })
                                     });
@@ -1974,7 +1975,7 @@ export default class SideNote extends Plugin {
                                                         decoration: Decoration.mark({
                                                             class: 'sidenote-highlight',
                                                             attributes: {
-                                                                'data-comment-timestamp': comment.timestamp.toString()
+                                                                'data-comment-id': comment.id || ""
                                                             }
                                                         })
                                                     });
@@ -2005,7 +2006,7 @@ export default class SideNote extends Plugin {
                                         decoration: Decoration.mark({
                                             class: 'sidenote-highlight',
                                             attributes: {
-                                                'data-comment-timestamp': comment.timestamp.toString()
+                                                'data-comment-id': comment.id || ""
                                             }
                                         })
                                     });
@@ -2030,7 +2031,7 @@ export default class SideNote extends Plugin {
                                         decoration: Decoration.mark({
                                             class: 'sidenote-highlight orphaned',
                                             attributes: {
-                                                'data-comment-timestamp': comment.timestamp.toString()
+                                                'data-comment-id': comment.id || ""
                                             }
                                         })
                                     });

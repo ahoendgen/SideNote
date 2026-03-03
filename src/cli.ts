@@ -45,7 +45,7 @@ Options:
 
   -h, --help       Show this help.
   -V, --version    Show the version number.
-  --vault <path>   Path to the Obsidian vault root (required).
+  --vault <path>   Path to the Obsidian vault root (auto-detected from cwd).
   --pretty         Human-readable output (default: JSON).
 
 Commands:
@@ -72,7 +72,7 @@ Description:
 
 Options:
 
-  --vault <path>       Path to the Obsidian vault root (required).
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
   --file <path>        Filter by vault-relative file path.
   --resolved           Show only resolved comments.
   --unresolved         Show only unresolved comments.
@@ -125,7 +125,7 @@ Description:
 
 Options:
 
-  --vault <path>       Path to the Obsidian vault root (required).
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
   --id <id>            ID of the parent comment (required).
   --comment <text>     Reply text (required).
   --pretty             Human-readable output.
@@ -144,7 +144,7 @@ Description:
 
 Options:
 
-  --vault <path>       Path to the Obsidian vault root (required).
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
   --id <id>            ID of the comment to edit (required).
   --comment <text>     New comment text (required).
   --pretty             Human-readable output.
@@ -163,7 +163,7 @@ Description:
 
 Options:
 
-  --vault <path>       Path to the Obsidian vault root (required).
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
   --id <id>            ID of the comment (required).
   --pretty             Human-readable output.
 
@@ -181,7 +181,7 @@ Description:
 
 Options:
 
-  --vault <path>       Path to the Obsidian vault root (required).
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
   --id <id>            ID of the comment (required).
   --pretty             Human-readable output.
 
@@ -199,7 +199,7 @@ Description:
 
 Options:
 
-  --vault <path>       Path to the Obsidian vault root (required).
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
   --id <id>            ID of the comment (required).
   --pretty             Human-readable output.
 
@@ -530,6 +530,21 @@ function cmdDelete(vaultPath: string, args: ParsedArgs): void {
   printOutput({ message: `Comment ${id} in "${target.filePath}" deleted`, id }, !!args.pretty);
 }
 
+// --- Vault detection ---
+
+function detectVault(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, ".obsidian"))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  fail("No --vault provided and no .obsidian folder found within 10 parent directories. Use --vault <path>.");
+}
+
 // --- Main ---
 
 function main(): void {
@@ -553,11 +568,7 @@ function main(): void {
     fail(`Unknown command: "${command}". Run "sidenote --help" for available commands.`);
   }
 
-  if (!args.vault) {
-    fail("--vault <path> is required. Provide the path to your Obsidian vault.");
-  }
-
-  const vaultPath = path.resolve(args.vault as string);
+  const vaultPath = args.vault ? path.resolve(args.vault as string) : detectVault();
   if (!fs.existsSync(vaultPath)) {
     fail(`Vault path does not exist: ${vaultPath}`);
   }

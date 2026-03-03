@@ -1,0 +1,112 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SideNote Comment",
+  "description": "Schema for a single comment line in comments.jsonl. Each line in the file is one JSON object matching this schema. The file is stored at .obsidian/plugins/side-note/comments.jsonl inside an Obsidian vault.",
+  "type": "object",
+  "required": ["id", "filePath", "startLine", "startChar", "endLine", "endChar", "selectedText", "selectedTextHash", "comment", "timestamp"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier (nanoid, 3 characters). Used for all lookups, edits, deletes, and parent references.",
+      "pattern": "^.{3,}$"
+    },
+    "filePath": {
+      "type": "string",
+      "description": "Vault-relative path to the commented file (e.g. 'notes/todo.md')."
+    },
+    "comment": {
+      "type": "string",
+      "description": "The actual comment text."
+    },
+    "timestamp": {
+      "type": "number",
+      "description": "Unix timestamp in milliseconds when the comment was created. Used only for display and sorting, NOT as an identifier."
+    },
+    "type": {
+      "type": "string",
+      "enum": ["selection", "file"],
+      "description": "Comment type. 'file' = comment on the whole file (no text anchor). 'selection' = comment on a specific text selection. Defaults to 'selection' if omitted."
+    },
+    "parentId": {
+      "type": "string",
+      "description": "ID of the parent comment. Present only on replies. Replies always point to the root comment (flat hierarchy, max 1 level deep)."
+    },
+    "parentTimestamp": {
+      "type": "number",
+      "description": "Legacy field: timestamp of the parent comment. Use parentId instead for lookups."
+    },
+    "resolved": {
+      "type": "boolean",
+      "description": "Whether this comment is resolved. Resolving a root comment cascades to all its replies."
+    },
+    "resolvedAt": {
+      "type": ["number", "null"],
+      "description": "Unix timestamp in milliseconds when the comment was resolved. Null if unresolved."
+    },
+    "isOrphaned": {
+      "type": "boolean",
+      "description": "True when the anchored text was deleted from the file. Only applies to selection comments."
+    },
+    "selectedText": {
+      "type": "string",
+      "description": "The original text that was selected when creating the comment. Empty string for file comments."
+    },
+    "selectedTextHash": {
+      "type": "string",
+      "description": "SHA-256 hash of selectedText for robust text anchoring. Empty string for file comments."
+    },
+    "startLine": {
+      "type": "integer",
+      "description": "0-based start line of the text selection. 0 for file comments."
+    },
+    "startChar": {
+      "type": "integer",
+      "description": "0-based start character within the start line. 0 for file comments."
+    },
+    "endLine": {
+      "type": "integer",
+      "description": "0-based end line of the text selection. 0 for file comments."
+    },
+    "endChar": {
+      "type": "integer",
+      "description": "0-based end character within the end line. 0 for file comments."
+    },
+    "commentPath": {
+      "type": "string",
+      "description": "Path to an optional external markdown file storing the comment body."
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "id": "jAL",
+      "filePath": "notes/todo.md",
+      "startLine": 0,
+      "startChar": 0,
+      "endLine": 0,
+      "endChar": 0,
+      "selectedText": "",
+      "selectedTextHash": "",
+      "comment": "This file needs a review",
+      "timestamp": 1772551400293,
+      "isOrphaned": false,
+      "type": "file"
+    },
+    {
+      "id": "U4Z",
+      "filePath": "notes/todo.md",
+      "startLine": 0,
+      "startChar": 0,
+      "endLine": 0,
+      "endChar": 0,
+      "selectedText": "",
+      "selectedTextHash": "",
+      "comment": "Agreed, I'll take a look",
+      "timestamp": 1772553735079,
+      "isOrphaned": false,
+      "type": "file",
+      "parentTimestamp": 1772551400293,
+      "parentId": "jAL"
+    }
+  ]
+}

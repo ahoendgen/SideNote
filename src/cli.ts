@@ -26,7 +26,8 @@ interface CommentOutput {
 }
 
 interface ParsedArgs {
-  [key: string]: string | boolean | undefined;
+  _positional?: string[];
+  [key: string]: string | boolean | string[] | undefined;
 }
 
 // --- Help texts ---
@@ -51,6 +52,7 @@ Options:
 Commands:
 
   list        List and filter comments (grouped with replies).
+  show        Show comments for a specific file.
   add         Add a new comment to a file.
   reply       Reply to an existing comment.
   edit        Edit a comment's text.
@@ -84,6 +86,28 @@ Examples:
   sidenote list --vault ~/my-vault
   sidenote list --vault ~/my-vault --file "notes/todo.md"
   sidenote list --vault ~/my-vault --unresolved --pretty
+`.trim(),
+
+  show: `
+Usage:   sidenote show <file> [options]
+
+Description:
+
+  Show all comments for a specific file (vault-relative path).
+  Comments are grouped with their replies.
+
+Options:
+
+  --vault <path>       Path to the Obsidian vault root (auto-detected from cwd).
+  --resolved           Show only resolved comments.
+  --unresolved         Show only unresolved comments.
+  --include-replies    Flat list instead of grouped threads.
+  --pretty             Human-readable output.
+
+Examples:
+
+  sidenote show "notes/todo.md"
+  sidenote show "notes/todo.md" --unresolved --pretty
 `.trim(),
 
   add: `
@@ -310,6 +334,8 @@ function parseArgs(argv: string[]): { command: string | null; args: ParsedArgs }
       command = arg;
       i++;
     } else {
+      if (!args._positional) args._positional = [];
+      (args._positional as string[]).push(arg);
       i++;
     }
   }
@@ -374,6 +400,41 @@ function cmdList(vaultPath: string, args: ParsedArgs): void {
   if (args.file) {
     comments = comments.filter((c) => c.filePath === args.file);
   }
+  if (args.resolved) {
+    comments = comments.filter((c) => c.resolved);
+  } else if (args.unresolved) {
+    comments = comments.filter((c) => !c.resolved);
+  }
+
+  if (args["include-replies"]) {
+    printOutput(comments.map(toOutput), !!args.pretty);
+    return;
+  }
+
+  const roots = comments.filter((c) => !c.parentId && !c.parentTimestamp);
+  const repliesByParent = new Map<string, Comment[]>();
+  for (const c of comments) {
+    const pid = c.parentId;
+    if (pid) {
+      const arr = repliesByParent.get(pid) || [];
+      arr.push(c);
+      repliesByParent.set(pid, arr);
+    }
+  }
+
+  const grouped = roots.map((root) =>
+    toGroupedOutput(root, (repliesByParent.get(root.id!) || []).sort((a, b) => a.timestamp - b.timestamp))
+  );
+
+  printOutput(grouped, !!args.pretty);
+}
+
+function cmdShow(vaultPath: string, args: ParsedArgs): void {
+  const file = args._positional?.[0];
+  if (!file) fail("File path is required. Run 'sidenote show --help' for usage.");
+
+  let comments = loadComments(vaultPath).filter((c) => c.filePath === file);
+
   if (args.resolved) {
     comments = comments.filter((c) => c.resolved);
   } else if (args.unresolved) {
@@ -574,7 +635,7 @@ function main(): void {
   }
 
   const handlers: Record<string, (v: string, a: ParsedArgs) => void> = {
-    list: cmdList, add: cmdAdd, reply: cmdReply, edit: cmdEdit,
+    list: cmdList, show: cmdShow, add: cmdAdd, reply: cmdReply, edit: cmdEdit,
     resolve: cmdResolve, unresolve: cmdUnresolve, delete: cmdDelete,
   };
   handlers[command](vaultPath, args);

@@ -1118,6 +1118,7 @@ export default class SideNote extends Plugin {
     comments: Comment[] = [];
     private editorUpdateTimers: Record<string, number> = {};
     inlineRenderer: InlineCommentsRenderer;
+    private _selfWritingComments = false;
 
     /** Ensure markdown comment folder exists and return normalized path */
     private async ensureCommentFolder(): Promise<string> {
@@ -1431,6 +1432,22 @@ export default class SideNote extends Plugin {
                         console.error("Error reloading plugin data:", error);
                     }
                 }
+                // Handle external changes to comments.jsonl (e.g., from CLI)
+                else if (file instanceof TFile && file.path === this.getCommentsFilePath()) {
+                    if (this._selfWritingComments) return;
+                    try {
+                        await this.mergeExternalComments();
+                        this.app.workspace.getLeavesOfType("sidenote-view").forEach(leaf => {
+                            if (leaf.view instanceof SideNoteView) {
+                                leaf.view.renderComments();
+                            }
+                        });
+                        this.refreshEditorDecorations();
+                        this.inlineRenderer.updateAll();
+                    } catch (error) {
+                        console.error("Error merging external comments:", error);
+                    }
+                }
                 // Update comment coordinates when Markdown files are modified
                 else if (file instanceof TFile && file.extension === 'md') {
                     try {
@@ -1569,8 +1586,43 @@ export default class SideNote extends Plugin {
     }
 
     private async saveComments() {
-        const lines = this.comments.map(c => JSON.stringify(c));
-        await this.app.vault.adapter.write(this.getCommentsFilePath(), lines.join('\n'));
+        await this.mergeExternalComments();
+        this._selfWritingComments = true;
+        try {
+            const lines = this.comments.map(c => JSON.stringify(c));
+            await this.app.vault.adapter.write(this.getCommentsFilePath(), lines.join('\n'));
+        } finally {
+            setTimeout(() => { this._selfWritingComments = false; }, 1000);
+        }
+    }
+
+    /**
+     * Merge comments from disk that are not in memory (e.g., added by CLI).
+     * Preserves plugin's in-memory state while picking up externally added comments.
+     */
+    private async mergeExternalComments() {
+        try {
+            const diskComments = await this.loadCommentsFromJsonl();
+            if (diskComments.length === 0) return;
+
+            const memoryIds = new Set(
+                this.comments.map(c => c.id).filter((id): id is string => !!id)
+            );
+
+            let changed = false;
+            for (const dc of diskComments) {
+                if (dc.id && !memoryIds.has(dc.id)) {
+                    this.comments.push(dc);
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                this.commentManager.updateComments(this.comments);
+            }
+        } catch (e) {
+            console.warn('SideNote: Failed to merge external comments', e);
+        }
     }
 
     private async loadCommentsFromJsonl(): Promise<Comment[]> {

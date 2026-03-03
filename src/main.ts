@@ -33,6 +33,31 @@ async function generateHash(text: string): Promise<string> {
     }
 }
 
+// Format timestamp as "dd.mm.yyyy" with locale-aware relative time for recent comments
+function formatTimestamp(ts: number): string {
+    const d = new Date(ts);
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const absolute = `${dd}.${mm}.${yyyy}`;
+
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+
+    let relative: string | null = null;
+    if (diff < 60) {
+        relative = rtf.format(-diff, 'second');
+    } else if (diff < 3600) {
+        relative = rtf.format(-Math.floor(diff / 60), 'minute');
+    } else if (diff < 86400) {
+        relative = rtf.format(-Math.floor(diff / 3600), 'hour');
+    } else if (diff < 2592000) {
+        relative = rtf.format(-Math.floor(diff / 86400), 'day');
+    }
+
+    return relative ? `${absolute} · ${relative}` : absolute;
+}
+
 // Define a state effect to trigger decoration updates
 const forceUpdateEffect = StateEffect.define<null>();
 
@@ -221,7 +246,7 @@ class SideNoteView extends ItemView {
                     } else {
                         textInfoEl.createEl("h4", { text: comment.selectedText, cls: "sidenote-selected-text" });
                     }
-                    textInfoEl.createEl("small", { text: new Date(comment.timestamp).toLocaleString(), cls: "sidenote-timestamp" });
+                    textInfoEl.createEl("small", { text: formatTimestamp(comment.timestamp), cls: "sidenote-timestamp" });
 
                     const actionsEl = headerEl.createDiv("sidenote-comment-actions");
 
@@ -974,7 +999,7 @@ class InlineCommentsRenderer {
         } else {
             textInfoEl.createEl('h4', { text: comment.selectedText, cls: 'sidenote-selected-text' });
         }
-        textInfoEl.createEl('small', { text: new Date(comment.timestamp).toLocaleString(), cls: 'sidenote-timestamp' });
+        textInfoEl.createEl('small', { text: formatTimestamp(comment.timestamp), cls: 'sidenote-timestamp' });
 
         const actionsEl = headerEl.createDiv('sidenote-comment-actions');
 

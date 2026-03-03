@@ -41,9 +41,26 @@ const context = await esbuild.context({
 	minify: prod,
 });
 
+// CLI build (standalone Node.js script, no Obsidian dependencies)
+const cliBuild = await esbuild.context({
+	banner: { js: "#!/usr/bin/env node" },
+	entryPoints: ["src/cli.ts"],
+	bundle: true,
+	platform: "node",
+	format: "cjs",
+	target: "es2018",
+	logLevel: "info",
+	sourcemap: false,
+	treeShaking: true,
+	outfile: "cli.js",
+	minify: prod,
+});
+
 if (prod) {
 	await context.rebuild();
+	await cliBuild.rebuild();
 	process.exit(0);
 } else {
 	await context.watch();
+	await cliBuild.watch();
 }

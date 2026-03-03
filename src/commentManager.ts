@@ -1,20 +1,6 @@
-export interface Comment {
-    filePath: string;
-    startLine: number;
-    startChar: number;
-    endLine: number;
-    endChar: number;
-    selectedText: string;
-    selectedTextHash: string;
-    comment: string;
-    timestamp: number;
-    isOrphaned?: boolean;
-    commentPath?: string; // Path to markdown-stored comment (optional)
-    resolved?: boolean; // Whether comment is marked as resolved (hidden but preserved)
-    resolvedAt?: number | null; // Timestamp when comment was resolved
-    type?: "selection" | "file"; // "file" = whole-file comment (no text anchor)
-    parentTimestamp?: number; // timestamp of parent comment (reply threading)
-}
+import { Comment, generateId } from './shared';
+
+export type { Comment };
 
 export class CommentManager {
     private comments: Comment[];
@@ -75,10 +61,25 @@ export class CommentManager {
         return this.comments.filter(comment => comment.filePath === filePath);
     }
 
+    private getExistingIds(): Set<string> {
+        return new Set(this.comments.map(c => c.id).filter((id): id is string => !!id));
+    }
+
     addComment(newComment: Comment) {
         // Generate hash if not present
         if (!newComment.selectedTextHash && newComment.selectedText) {
             newComment.selectedTextHash = this.generateHash(newComment.selectedText);
+        }
+        // Auto-generate short ID with collision check
+        if (!newComment.id) {
+            newComment.id = generateId(this.getExistingIds());
+        }
+        // Set parentId from parent comment's id
+        if (newComment.parentTimestamp && !newComment.parentId) {
+            const parent = this.comments.find(c => c.timestamp === newComment.parentTimestamp);
+            if (parent?.id) {
+                newComment.parentId = parent.id;
+            }
         }
         this.comments.push(newComment);
     }

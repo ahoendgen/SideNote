@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, App, MarkdownView, Notice, ViewStateResult, Plugin, Modal, Setting, PluginSettingTab, editorLivePreviewField, MarkdownRenderer, setIcon } from "obsidian";
 import { Comment, CommentManager } from "./commentManager";
+import { generateId } from "./shared";
 import { EditorView, Decoration, DecorationSet, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import { RangeSetBuilder, StateEffect } from "@codemirror/state";
 
@@ -1400,6 +1401,7 @@ export default class SideNote extends Plugin {
                             leaf.view.renderComments();
                         }
                     });
+                    this.inlineRenderer.updateAll();
                 }
             })
         );
@@ -1597,6 +1599,28 @@ export default class SideNote extends Plugin {
             await this.saveComments();
             // Remove comments from data.json by re-saving settings only
             await super.saveData({ ...this.settings });
+        }
+
+        // Backfill nanoid IDs for comments that don't have them yet
+        const existingIds = new Set(this.comments.map(c => c.id).filter((id): id is string => !!id));
+        let needsSave = false;
+        for (const c of this.comments) {
+            if (!c.id) {
+                c.id = generateId(existingIds);
+                needsSave = true;
+            }
+        }
+        // Backfill parentId (needs all IDs to be set first)
+        if (needsSave) {
+            for (const c of this.comments) {
+                if (c.parentTimestamp && !c.parentId) {
+                    const parent = this.comments.find(p => p.timestamp === c.parentTimestamp);
+                    if (parent?.id) {
+                        c.parentId = parent.id;
+                    }
+                }
+            }
+            await this.saveComments();
         }
 
         // Apply highlight color on load

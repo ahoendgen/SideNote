@@ -772,6 +772,10 @@ class SideNoteSettingTab extends PluginSettingTab {
                     .setButtonText(`Delete ${orphanedCount} orphaned comment(s)`)
                     .setWarning()
                     .onClick(async () => {
+                        // Track orphaned IDs before deleting so merge won't re-add them
+                        for (const c of this.plugin.commentManager.getOrphanedComments()) {
+                            if (c.id) this.plugin.trackDeletedId(c.id);
+                        }
                         const deleted = this.plugin.commentManager.deleteOrphanedComments();
                         await this.plugin.saveData();
                         // Re-render views
@@ -1144,6 +1148,7 @@ export default class SideNote extends Plugin {
     private editorUpdateTimers: Record<string, number> = {};
     inlineRenderer: InlineCommentsRenderer;
     private _selfWritingComments = false;
+    private _deletedIds = new Set<string>();
     private _commentsFileWatcher: ReturnType<typeof import('fs').watch> | null = null;
 
     /** Ensure markdown comment folder exists and return normalized path */
@@ -1560,7 +1565,7 @@ export default class SideNote extends Plugin {
 
                         let changed = false;
                         for (const dc of diskComments) {
-                            if (dc.id && !memoryIds.has(dc.id)) {
+                            if (dc.id && !memoryIds.has(dc.id) && !this._deletedIds.has(dc.id)) {
                                 this.comments.push(dc);
                                 changed = true;
                             }
@@ -1657,8 +1662,17 @@ export default class SideNote extends Plugin {
     }
 
     async deleteComment(id: string) {
+        // Track deleted IDs so mergeExternalComments won't re-add them from disk
+        this._deletedIds.add(id);
+        for (const c of this.comments) {
+            if (c.parentId === id && c.id) this._deletedIds.add(c.id);
+        }
         this.commentManager.deleteComment(id);
         void this.onCommentsChanged("Comment deleted!");
+    }
+
+    trackDeletedId(id: string) {
+        this._deletedIds.add(id);
     }
 
     async resolveComment(id: string) {
@@ -1677,6 +1691,7 @@ export default class SideNote extends Plugin {
 
     private async saveComments() {
         await this.mergeExternalComments();
+        this._deletedIds.clear();
         this._selfWritingComments = true;
         try {
             const lines = this.comments.map(c => JSON.stringify(c));
@@ -1701,7 +1716,7 @@ export default class SideNote extends Plugin {
 
             let changed = false;
             for (const dc of diskComments) {
-                if (dc.id && !memoryIds.has(dc.id)) {
+                if (dc.id && !memoryIds.has(dc.id) && !this._deletedIds.has(dc.id)) {
                     this.comments.push(dc);
                     changed = true;
                 }

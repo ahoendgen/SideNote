@@ -96,8 +96,12 @@ export class CommentManager {
         if (indexToDelete > -1) {
             this.comments.splice(indexToDelete, 1);
         }
-        // Cascade: delete all replies to this comment
-        this.comments = this.comments.filter(c => c.parentId !== id);
+        // Cascade: delete all replies to this comment (splice in-place to keep array reference)
+        for (let i = this.comments.length - 1; i >= 0; i--) {
+            if (this.comments[i].parentId === id) {
+                this.comments.splice(i, 1);
+            }
+        }
     }
 
     resolveComment(id: string) {

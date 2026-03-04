@@ -582,6 +582,8 @@
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
+    height: 32px;
+    box-sizing: border-box;
 }
 
 /* Prevent inline comments from being editable in CM6 editor */

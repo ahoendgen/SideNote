@@ -875,8 +875,10 @@ class InlineCommentsRenderer {
     private renderInto(container: HTMLElement, filePath: string) {
         container.empty();
 
-        let comments = this.plugin.commentManager.getCommentsForFile(filePath);
+        const allComments = this.plugin.commentManager.getCommentsForFile(filePath);
+        const hasResolved = allComments.some((c: Comment) => c.resolved);
 
+        let comments = allComments;
         if (!this.plugin.settings.showResolvedComments) {
             comments = comments.filter((c: Comment) => !c.resolved);
         }
@@ -895,11 +897,30 @@ class InlineCommentsRenderer {
 
         // Header with collapse (only if comments exist)
         let commentsList: HTMLElement | null = null;
-        if (comments.length > 0) {
+        if (comments.length > 0 || (hasResolved && !this.plugin.settings.showResolvedComments)) {
             const header = container.createDiv('sidenote-inline-header');
             const collapseIcon = header.createSpan('sidenote-inline-collapse-icon');
             setIcon(collapseIcon, 'chevron-down');
             header.createSpan({ text: `Comments (${comments.length})`, cls: 'sidenote-inline-header-text' });
+
+            // Toggle for resolved comments (only shown when resolved comments exist)
+            if (hasResolved) {
+                const toggle = header.createEl('label', { cls: 'sidenote-inline-resolved-toggle' });
+                const checkbox = toggle.createEl('input', { type: 'checkbox' });
+                checkbox.checked = this.plugin.settings.showResolvedComments;
+                toggle.createSpan({ text: 'Resolved' });
+                toggle.addEventListener('click', (e) => e.stopPropagation());
+                checkbox.addEventListener('change', async () => {
+                    this.plugin.settings.showResolvedComments = checkbox.checked;
+                    await this.plugin.saveData();
+                    this.plugin.app.workspace.getLeavesOfType("sidenote-view").forEach((leaf: any) => {
+                        if (leaf.view instanceof SideNoteView) {
+                            leaf.view.renderComments();
+                        }
+                    });
+                    this.updateAll();
+                });
+            }
 
             commentsList = container.createDiv('sidenote-inline-comments-list');
 

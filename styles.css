@@ -360,6 +360,23 @@
     flex-grow: 1;
 }
 
+.sidenote-inline-resolved-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--font-ui-smaller);
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.sidenote-inline-resolved-toggle:hover {
+    color: var(--text-normal);
+}
+
+.sidenote-inline-resolved-toggle input[type="checkbox"] {
+    margin: 0;
+}
+
 .sidenote-inline-comments-list {
     padding: 0 16px;
 }
